@@ -13,7 +13,7 @@ FIRST_FRAME_INDEX = -123
 class Game(Base):
     """Replay data from a game of Super Smash Brothers Melee."""
 
-    def __init__(self, path):
+    def __init__(self, path, skip_frames = False):
         """Reads data from the Slippi (.slp) replay file at `path`."""
 
         self.metadata = None
@@ -30,7 +30,7 @@ class Game(Base):
 
         self._out_of_order = False
 
-        self._parse_file(path)
+        self._parse_file(path, skip_frames)
 
     def _parse_event_payloads(self, stream):
         (code, payload_size) = unpack('BB', stream)
@@ -47,7 +47,7 @@ class Game(Base):
             payload_sizes[code] = size
         return payload_sizes
 
-    def _parse_event(self, event_stream, payload_sizes):
+    def _parse_event(self, event_stream, payload_sizes, skip_frames):
         (code,) = unpack('B', event_stream)
         payload = event_stream.read(payload_sizes[code])
         stream = io.BytesIO(payload)
@@ -58,10 +58,12 @@ class Game(Base):
         if event_type is evt.EventType.GAME_START:
             return evt.Start._parse(stream)
         elif event_type is evt.EventType.FRAME_PRE:
-            return evt.Frame.Event(evt.Frame.Event.Id(stream),
+            return None if skip_frames else \
+                   evt.Frame.Event(evt.Frame.Event.Id(stream),
                                    evt.Frame.Port.Data.Pre(stream))
         elif event_type is evt.EventType.FRAME_POST:
-            return evt.Frame.Event(evt.Frame.Event.Id(stream),
+            return None if skip_frames else \
+                   evt.Frame.Event(evt.Frame.Event.Id(stream),
                                    evt.Frame.Port.Data.Post(stream))
         elif event_type is evt.EventType.GAME_END:
             return evt.End._parse(stream)
@@ -69,7 +71,7 @@ class Game(Base):
             warn('unknown event code: 0x%02x' % code)
             return None
 
-    def _parse_file(self, path):
+    def _parse_file(self, path, skip_frames):
         """Parses the .slp file at `path`. Called automatically by our constructor."""
 
         with open(path, 'rb') as f:
@@ -82,8 +84,11 @@ class Game(Base):
 
         try:
             while True:
-                event = self._parse_event(stream, payload_sizes)
+                event = self._parse_event(stream, payload_sizes, skip_frames)
                 if isinstance(event, evt.Frame.Event):
+                    if skip_frames:
+                        continue
+
                     frame_index = event.id.frame - FIRST_FRAME_INDEX
 
                     if not self._out_of_order and len(self.frames) != frame_index and len(self.frames) != frame_index + 1:
